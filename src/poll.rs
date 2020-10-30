@@ -1,8 +1,7 @@
 use std::task::Context;
 
 use futures::{ready, task::Poll};
-use mio::Ready;
-use tokio::io::PollEvented;
+use tokio::io::unix::AsyncFd;
 use zmq;
 
 use crate::error::TmqError::InterruptedSend;
@@ -15,12 +14,12 @@ use zmq::Socket;
 ///
 /// Uses a wrapped ZMQ socket. It needs to use a distinct inner type because
 /// [`tokio::io::PollEvented`] requires a [`mio::Evented`] parameter.
-pub(crate) struct ZmqPoller(PollEvented<SocketWrapper>);
+pub(crate) struct ZmqPoller(AsyncFd<SocketWrapper>);
 
 impl ZmqPoller {
     #[inline]
     pub(crate) fn from_zmq_socket(socket: zmq::Socket) -> Result<Self> {
-        Ok(ZmqPoller(PollEvented::new(SocketWrapper::new(socket))?))
+        Ok(ZmqPoller(AsyncFd::new(SocketWrapper::new(socket))?))
     }
 }
 
@@ -66,7 +65,7 @@ impl ZmqPoller {
                         if !buffer.is_empty() {
                             read_buffer.push_back(buffer);
                         }
-                        self.clear_read_ready(cx, Ready::readable())?;
+                        ready!(self.poll_read_ready(cx))?.clear_ready();
 
                         if read_buffer.is_empty() {
                             break Poll::Pending;
@@ -106,7 +105,7 @@ impl ZmqPoller {
                 Err(zmq::Error::EAGAIN) => {
                     assert!(buffer.is_empty());
                     log::warn!("EAGAIN during first message read");
-                    self.clear_read_ready(cx, Ready::readable())?;
+                    ready!(self.poll_read_ready(cx))?.clear_ready();
                     return Poll::Pending;
                 }
                 Err(e) => return Poll::Ready(Err(e.into())),
@@ -184,14 +183,14 @@ impl ZmqPoller {
         if events.contains(event) {
             Poll::Ready(Ok(()))
         } else {
-            self.clear_read_ready(cx, Ready::readable())?;
+            ready!(self.poll_read_ready(cx))?.clear_ready();
             Poll::Pending
         }
     }
 }
 
 impl Deref for ZmqPoller {
-    type Target = PollEvented<SocketWrapper>;
+    type Target = AsyncFd<SocketWrapper>;
 
     fn deref(&self) -> &Self::Target {
         &self.0

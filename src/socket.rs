@@ -1,6 +1,8 @@
 use std::io;
+use std::os::unix::io::{AsRawFd, RawFd};
 
-use mio::{unix::EventedFd, Evented, Poll, PollOpt, Ready, Token};
+use mio::{event::Source, unix::SourceFd};
+use mio::{Interest, Registry, Token};
 
 use crate::Result;
 
@@ -17,27 +19,33 @@ impl SocketWrapper {
     }
 }
 
-impl Evented for SocketWrapper {
+impl Source for SocketWrapper {
     fn register(
-        &self,
-        poll: &Poll,
+        &mut self,
+        registry: &Registry,
         token: Token,
-        interest: Ready,
-        opts: PollOpt,
+        interests: Interest,
     ) -> io::Result<()> {
-        EventedFd(&self.socket.get_fd()?).register(poll, token, interest, opts)
+        SourceFd(&self.socket.get_fd()?).register(registry, token, interests)
     }
+
     fn reregister(
-        &self,
-        poll: &Poll,
+        &mut self,
+        registry: &Registry,
         token: Token,
-        interest: Ready,
-        opts: PollOpt,
+        interests: Interest,
     ) -> io::Result<()> {
-        EventedFd(&self.socket.get_fd()?).reregister(poll, token, interest, opts)
+        SourceFd(&self.socket.get_fd()?).reregister(registry, token, interests)
     }
-    fn deregister(&self, poll: &Poll) -> io::Result<()> {
-        EventedFd(&self.socket.get_fd()?).deregister(poll)
+
+    fn deregister(&mut self, registry: &Registry) -> io::Result<()> {
+        SourceFd(&self.socket.get_fd()?).deregister(registry)
+    }
+}
+
+impl AsRawFd for SocketWrapper {
+    fn as_raw_fd(&self) -> RawFd {
+        self.socket.get_fd().expect("SocketWrapper::as_raw_fd")
     }
 }
 
